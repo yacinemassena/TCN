@@ -8,7 +8,7 @@ s3 = boto3.client('s3',
 )
 
 bucket = 'europe'
-prefix = 'datasets/2022-2023/index_data/'
+prefix = 'datasets/index_data/'
 local_dir = Path('/TCN/datasets/2022-2023/index_data')
 local_dir.mkdir(parents=True, exist_ok=True)
 
