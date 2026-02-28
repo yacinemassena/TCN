@@ -40,6 +40,14 @@ GPU_PROFILES = {
         top_n_stocks=100,
         prefetch_files=8,
     ),
+    'rtx5090': GPUProfile(
+        name='rtx5090',
+        vram_gb=32,
+        max_chunks_per_batch=4000,
+        filter_stocks=False,
+        top_n_stocks=0,
+        prefetch_files=12,
+    ),
     'h100': GPUProfile(
         name='h100',
         vram_gb=80,
@@ -80,6 +88,7 @@ class StreamConfig:
     # Options: ~5.4M ticks/day → 0.7x stocks
     # Index: ~347K ticks/day → 0.04x stocks (can fit more frames per batch)
     max_chunks_16gb: int = 2000   # RTX 5080
+    max_chunks_32gb: int = 4000   # RTX 5090
     max_chunks_80gb: int = 11600  # H100/A100
     max_chunks_192gb: int = 28000 # AMD MI300X
     prefetch_files: int = 8
@@ -94,6 +103,7 @@ STREAM_CONFIGS = {
         allowed_tickers_file=str(DATA_ROOT / 'top_100_stocks.txt'),
         num_tickers=100,
         max_chunks_16gb=2000,   # ~8M ticks/day filtered → baseline
+        max_chunks_32gb=4000,   # RTX 5090
         max_chunks_80gb=11600,
         max_chunks_192gb=28000, # AMD MI300X
         prefetch_files=8,
@@ -105,6 +115,7 @@ STREAM_CONFIGS = {
         allowed_tickers_file=None,
         num_tickers=0,
         max_chunks_16gb=2800,   # ~5.4M ticks/day → more headroom
+        max_chunks_32gb=5600,   # RTX 5090
         max_chunks_80gb=16000,
         max_chunks_192gb=38000, # AMD MI300X
         prefetch_files=12,
@@ -116,6 +127,7 @@ STREAM_CONFIGS = {
         allowed_tickers_file=None,
         num_tickers=0,
         max_chunks_16gb=200,    # Conservative for RTX 5080
+        max_chunks_32gb=400,    # RTX 5090
         max_chunks_80gb=1500,   # Conservative for A100 with checkpointing
         max_chunks_192gb=3600,  # AMD MI300X - 2.4x A100
         prefetch_files=16,

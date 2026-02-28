@@ -145,6 +145,8 @@ def build_dataloaders(config: PretrainConfig, gpu_profile: GPUProfile, stream: s
     # Use stream-specific batch sizing based on GPU VRAM
     if gpu_profile.vram_gb <= 16:
         max_chunks = stream_config.max_chunks_16gb
+    elif gpu_profile.vram_gb <= 32:
+        max_chunks = stream_config.max_chunks_32gb
     elif gpu_profile.vram_gb <= 80:
         max_chunks = stream_config.max_chunks_80gb
     else:
@@ -579,8 +581,8 @@ def main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='TCN Pretraining - Per-Stream')
     parser.add_argument('--profile', type=str, default='rtx5080',
-                        choices=['rtx5080', 'h100', 'a100', 'amd'],
-                        help='GPU profile (rtx5080=16GB, h100/a100=80GB, amd=192GB)')
+                        choices=['rtx5080', 'rtx5090', 'h100', 'a100', 'amd'],
+                        help='GPU profile (rtx5080=16GB, rtx5090=32GB, h100/a100=80GB, amd=192GB)')
     parser.add_argument('--stream', type=str, default='stocks',
                         choices=['stocks', 'options', 'index'],
                         help='Data stream to train on')
