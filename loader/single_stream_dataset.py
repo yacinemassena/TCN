@@ -279,8 +279,13 @@ class SingleStreamDataset(IterableDataset):
         size_col = self.columns['size']
         time_col = self.columns['time']
         
-        # Ensure required columns exist (size_col can be None for index data)
-        required = [price_col, time_col]
+        # Ensure required columns exist (size_col and price_col can be None for index data)
+        required = [time_col]
+        if price_col is not None and price_col not in df.columns:
+            # Price is optional for index data - skip this file if missing
+            return
+        if price_col is not None:
+            required.append(price_col)
         if size_col is not None:
             required.append(size_col)
         missing = [c for c in required if c not in df.columns]
