@@ -32,6 +32,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.cuda.amp import GradScaler, autocast
 import numpy as np
+from tqdm import tqdm
 
 from config_pretrain import PretrainConfig, get_pretrain_config, GPU_PROFILES, GPUProfile, STREAM_CONFIGS, StreamConfig
 from loader.single_stream_dataset import SingleStreamDataset, SingleStreamBatch
@@ -208,6 +209,8 @@ def train_epoch(
     
     epoch_start = time.time()
     
+    pbar = tqdm(total=config.train.steps_per_epoch, desc=f"Epoch {epoch}", ncols=100)
+    
     for batch_idx, batch in enumerate(loader):
         if batch_idx >= config.train.steps_per_epoch:
             break
@@ -240,14 +243,12 @@ def train_epoch(
         predictions.append(rv_preds.detach().cpu())
         targets.append(rv_targets.detach().cpu())
         
-        if (batch_idx + 1) % config.train.log_every == 0:
-            avg_loss = total_loss / total_batches
-            elapsed = time.time() - epoch_start
-            logger.info(
-                f"Epoch {epoch} | Batch {batch_idx+1} | "
-                f"Loss: {avg_loss:.4f} | Samples: {total_samples} | "
-                f"Chunks: {batch.num_chunks} | Time: {elapsed:.1f}s"
-            )
+        # Update progress bar every batch
+        avg_loss = total_loss / total_batches
+        pbar.set_postfix({'loss': f'{avg_loss:.4f}', 'samples': total_samples})
+        pbar.update(1)
+    
+    pbar.close()
     
     if predictions:
         all_preds = torch.cat(predictions)
@@ -259,11 +260,14 @@ def train_epoch(
     else:
         corr = 0.0
     
+    epoch_time = time.time() - epoch_start
+    
     return {
         'loss': total_loss / max(total_batches, 1),
         'correlation': corr if not np.isnan(corr) else 0.0,
         'samples': total_samples,
         'batches': total_batches,
+        'time': epoch_time,
     }
 
 
@@ -425,7 +429,9 @@ def main(args):
     logger.info(f"Model parameters: {num_params:,}")
     
     # Build dataloaders
+    logger.info("Building dataloaders - this may take a moment...")
     train_loader, val_loader = build_dataloaders(config, gpu_profile, stream)
+    logger.info("Dataloaders ready - starting training loop...")
     
     # Optimizer
     optimizer = torch.optim.AdamW(
@@ -458,7 +464,13 @@ def main(args):
     best_val_loss = float('inf')
     patience_counter = 0
     
+    epoch_times = []
+    
     for epoch in range(1, config.train.epochs + 1):
+        logger.info(f"\n{'='*60}")
+        logger.info(f"Epoch {epoch}/{config.train.epochs}")
+        logger.info("="*60)
+        
         epoch_start = time.time()
         
         # Train
@@ -469,20 +481,25 @@ def main(args):
         # Validate
         val_metrics = validate(model, val_loader, criterion, config)
         
-        # Update scheduler
-        if scheduler:
-            scheduler.step()
-        
         epoch_time = time.time() - epoch_start
+        epoch_times.append(epoch_time)
         
-        # Logging
+        # Calculate ETA
+        avg_epoch_time = sum(epoch_times) / len(epoch_times)
+        remaining_epochs = config.train.epochs - epoch
+        eta_seconds = avg_epoch_time * remaining_epochs
+        eta_hours = eta_seconds / 3600
+        
+        # Log with ETA
         logger.info(
             f"Epoch {epoch}/{config.train.epochs} | "
             f"Train Loss: {train_metrics['loss']:.4f} | "
             f"Val Loss: {val_metrics['loss']:.4f} | "
-            f"Val Corr: {val_metrics['correlation']:.4f} | "
-            f"Val R²: {val_metrics['r2']:.4f} | "
-            f"Time: {epoch_time:.1f}s"
+            f"Train Corr: {train_metrics['correlation']:.3f} | "
+            f"Val Corr: {val_metrics['correlation']:.3f} | "
+            f"Time: {epoch_time:.1f}s | "
+            f"Avg: {avg_epoch_time:.1f}s | "
+            f"ETA: {eta_hours:.1f}h ({remaining_epochs} epochs left)"
         )
         
         # Checkpointing

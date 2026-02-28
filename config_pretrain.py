@@ -200,7 +200,7 @@ class PretrainTrainConfig:
     save_every_epochs: int = 10
     
     # Logging
-    log_every: int = 10  # Reduced from 50 for more frequent progress updates
+    log_every: int = 1  # Log every batch for full visibility
     wandb_project: Optional[str] = None  # Set to enable W&B logging
     wandb_run_name: Optional[str] = None
     
