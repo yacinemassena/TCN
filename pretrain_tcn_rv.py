@@ -195,6 +195,7 @@ def train_epoch(
     scaler: GradScaler,
     config: PretrainConfig,
     epoch: int,
+    use_checkpoint: bool = True,
 ) -> dict:
     """Train for one epoch."""
     model.train()
@@ -235,7 +236,7 @@ def train_epoch(
         
         amp_dtype = torch.bfloat16 if config.train.amp_dtype == 'bfloat16' else torch.float16
         with autocast(enabled=config.train.amp, dtype=amp_dtype):
-            rv_preds = model(batch, use_checkpoint=True)
+            rv_preds = model(batch, use_checkpoint=use_checkpoint)
             loss = criterion(rv_preds, rv_targets)
             loss = loss / grad_accum_steps
         
@@ -499,7 +500,8 @@ def main(args):
         
         # Train
         train_metrics = train_epoch(
-            model, train_loader, optimizer, criterion, scaler, config, epoch
+            model, train_loader, optimizer, criterion, scaler, config, epoch,
+            use_checkpoint=not args.no_checkpoint
         )
         
         # Validate
@@ -562,6 +564,8 @@ if __name__ == '__main__':
     parser.add_argument('--rv_file', type=str, help='Path to precomputed RV file')
     parser.add_argument('--epochs', type=int, help='Number of epochs')
     parser.add_argument('--device', type=str, default='cuda', help='Device')
+    parser.add_argument('--no-checkpoint', action='store_true', 
+                        help='Disable gradient checkpointing (faster but uses more VRAM)')
     
     args = parser.parse_args()
     main(args)
