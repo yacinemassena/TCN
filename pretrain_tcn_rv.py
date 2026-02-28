@@ -312,8 +312,13 @@ def validate(
     total_loss = 0.0
     total_samples = 0
     total_batches = 0
-    predictions = []
-    targets = []
+    # Use running stats instead of accumulating tensors
+    sum_preds = 0.0
+    sum_targets = 0.0
+    sum_preds_sq = 0.0
+    sum_targets_sq = 0.0
+    sum_preds_targets = 0.0
+    n_for_corr = 0
     
     for batch_idx, batch in enumerate(loader):
         if batch_idx >= config.train.val_steps:
@@ -334,20 +339,36 @@ def validate(
         total_loss += loss.item()
         total_samples += n_samples
         total_batches += 1
-        predictions.append(rv_preds.cpu())
-        targets.append(rv_targets.cpu())
-    
-    if predictions:
-        all_preds = torch.cat(predictions)
-        all_targets = torch.cat(targets)
         
-        if len(all_preds) > 1:
-            corr = torch.corrcoef(torch.stack([all_preds.flatten(), all_targets.flatten()]))[0, 1].item()
-            ss_res = ((all_preds - all_targets) ** 2).sum()
-            ss_tot = ((all_targets - all_targets.mean()) ** 2).sum()
-            r2 = (1 - (ss_res / (ss_tot + 1e-8))).item()
+        # Update running stats
+        preds_cpu = rv_preds.detach().float().cpu()
+        targs_cpu = rv_targets.detach().float().cpu()
+        sum_preds += preds_cpu.sum().item()
+        sum_targets += targs_cpu.sum().item()
+        sum_preds_sq += (preds_cpu ** 2).sum().item()
+        sum_targets_sq += (targs_cpu ** 2).sum().item()
+        sum_preds_targets += (preds_cpu * targs_cpu).sum().item()
+        n_for_corr += len(preds_cpu)
+    
+    # Compute correlation and R2 from running stats
+    if n_for_corr > 1:
+        mean_p = sum_preds / n_for_corr
+        mean_t = sum_targets / n_for_corr
+        var_p = sum_preds_sq / n_for_corr - mean_p ** 2
+        var_t = sum_targets_sq / n_for_corr - mean_t ** 2
+        cov = sum_preds_targets / n_for_corr - mean_p * mean_t
+        
+        # Correlation
+        if var_p > 0 and var_t > 0:
+            corr = cov / (np.sqrt(var_p) * np.sqrt(var_t))
         else:
-            corr, r2 = 0.0, 0.0
+            corr = 0.0
+        
+        # R2 = 1 - (SS_res / SS_tot) = 1 - (var_residual / var_target)
+        # SS_res = sum((y - y_pred)^2) = sum(y^2) - 2*sum(y*y_pred) + sum(y_pred^2)
+        ss_res = sum_targets_sq - 2 * sum_preds_targets + sum_preds_sq
+        ss_tot = sum_targets_sq - n_for_corr * mean_t ** 2
+        r2 = 1 - (ss_res / (ss_tot + 1e-8))
     else:
         corr, r2 = 0.0, 0.0
     
