@@ -220,6 +220,10 @@ def train_epoch(
         if batch_idx >= config.train.steps_per_epoch:
             break
         
+        # Debug: log actual batch size on first batch
+        if batch_idx == 0:
+            logger.info(f"Batch 0: {batch.num_chunks} chunks, {batch.num_frames} frames, chunks shape: {batch.chunks.shape}")
+        
         batch.to_device(device)
         rv_targets = batch.get_rv_targets(device)
         

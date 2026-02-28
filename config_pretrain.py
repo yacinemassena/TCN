@@ -96,7 +96,7 @@ STREAM_CONFIGS = {
         allowed_tickers_file=None,
         num_tickers=0,
         max_chunks_16gb=1500,   # Reduced from 4000 - RTX 5080 OOM with TCN-12
-        max_chunks_80gb=3000,   # 2x scaling from 16GB baseline for H100
+        max_chunks_80gb=1500,   # Same as 16GB baseline for debugging
         prefetch_files=16,
     ),
 }
