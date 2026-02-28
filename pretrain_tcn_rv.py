@@ -201,8 +201,13 @@ def train_epoch(
     total_loss = 0.0
     total_samples = 0
     total_batches = 0
-    predictions = []
-    targets = []
+    # Use running stats instead of accumulating all predictions
+    sum_preds = 0.0
+    sum_targets = 0.0
+    sum_preds_sq = 0.0
+    sum_targets_sq = 0.0
+    sum_preds_targets = 0.0
+    n_for_corr = 0
     
     grad_accum_steps = config.train.grad_accum_steps
     optimizer.zero_grad()
@@ -240,8 +245,17 @@ def train_epoch(
         total_loss += loss.item() * grad_accum_steps
         total_samples += n_samples
         total_batches += 1
-        predictions.append(rv_preds.detach().cpu())
-        targets.append(rv_targets.detach().cpu())
+        
+        # Update running correlation stats (no memory accumulation)
+        with torch.no_grad():
+            preds_cpu = rv_preds.detach().float().cpu()
+            targs_cpu = rv_targets.detach().float().cpu()
+            sum_preds += preds_cpu.sum().item()
+            sum_targets += targs_cpu.sum().item()
+            sum_preds_sq += (preds_cpu ** 2).sum().item()
+            sum_targets_sq += (targs_cpu ** 2).sum().item()
+            sum_preds_targets += (preds_cpu * targs_cpu).sum().item()
+            n_for_corr += len(preds_cpu)
         
         # Update progress bar every batch
         avg_loss = total_loss / total_batches
@@ -250,11 +264,15 @@ def train_epoch(
     
     pbar.close()
     
-    if predictions:
-        all_preds = torch.cat(predictions)
-        all_targets = torch.cat(targets)
-        if len(all_preds) > 1:
-            corr = torch.corrcoef(torch.stack([all_preds.flatten(), all_targets.flatten()]))[0, 1].item()
+    # Compute correlation from running stats
+    if n_for_corr > 1:
+        mean_p = sum_preds / n_for_corr
+        mean_t = sum_targets / n_for_corr
+        var_p = sum_preds_sq / n_for_corr - mean_p ** 2
+        var_t = sum_targets_sq / n_for_corr - mean_t ** 2
+        cov = sum_preds_targets / n_for_corr - mean_p * mean_t
+        if var_p > 0 and var_t > 0:
+            corr = cov / (np.sqrt(var_p) * np.sqrt(var_t))
         else:
             corr = 0.0
     else:
