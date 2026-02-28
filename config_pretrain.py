@@ -96,7 +96,7 @@ STREAM_CONFIGS = {
         allowed_tickers_file=None,
         num_tickers=0,
         max_chunks_16gb=1500,   # Reduced from 4000 - RTX 5080 OOM with TCN-12
-        max_chunks_80gb=24000,
+        max_chunks_80gb=8000,   # Reduced from 24000 - H100 OOM with dense index data
         prefetch_files=16,
     ),
 }
