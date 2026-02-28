@@ -1,0 +1,115 @@
+# TCN Pretraining - Quick Reference Commands
+
+## Windows (Local) - RTX 5080 / Blackwell sm_120
+
+### Setup venv (one-time)
+py -3.12 -m venv tcnvenv
+tcnvenv\Scripts\python.exe -m pip install --upgrade pip setuptools wheel
+tcnvenv\Scripts\python.exe -m pip install --pre torch torchvision --index-url https://download.pytorch.org/whl/nightly/cu128
+tcnvenv\Scripts\python.exe -m pip install pandas pyarrow tqdm
+
+### Activate Virtual Environment
+tcnvenv\Scripts\activate
+
+### Deactivate
+deactivate
+
+### Verify CUDA sm_120 support
+tcnvenv\Scripts\python.exe -c "import torch; print('PyTorch:', torch.__version__); print('CUDA:', torch.cuda.is_available()); print('Device:', torch.cuda.get_device_name(0)); print('Capability:', torch.cuda.get_device_capability(0))"
+
+### Run Training Commands (GPU)
+
+# Train INDEX stream on RTX 5080 GPU
+tcnvenv\Scripts\python.exe pretrain_tcn_rv.py --profile rtx5080 --stream index
+
+# Train STOCKS stream on RTX 5080 (filtered top 100)
+tcnvenv\Scripts\python.exe pretrain_tcn_rv.py --profile rtx5080 --stream stocks
+
+# Train OPTIONS stream on RTX 5080
+tcnvenv\Scripts\python.exe pretrain_tcn_rv.py --profile rtx5080 --stream options
+
+# Override epochs
+tcnvenv\Scripts\python.exe pretrain_tcn_rv.py --profile rtx5080 --stream index --epochs 10
+
+# Override RV file path
+tcnvenv\Scripts\python.exe pretrain_tcn_rv.py --profile rtx5080 --stream index --rv_file "path/to/rv.parquet"
+
+
+## Linux/VPS (Cloud)
+
+### Setup (One-time)
+chmod +x setup_tcn.sh
+./setup_tcn.sh
+
+### Activate Virtual Environment
+source venv_tcn/bin/activate
+
+### Deactivate
+deactivate
+
+### Run Training Commands
+
+# Train INDEX stream on H100 (full CUDA support)
+python pretrain_tcn_rv.py --profile h100 --stream index
+
+# Train STOCKS stream on H100 (full universe, no filtering)
+python pretrain_tcn_rv.py --profile h100 --stream stocks
+
+# Train OPTIONS stream on H100
+python pretrain_tcn_rv.py --profile h100 --stream options
+
+# Train STOCKS stream on A100 (full universe)
+python pretrain_tcn_rv.py --profile a100 --stream stocks
+
+# Override epochs
+python pretrain_tcn_rv.py --profile h100 --stream index --epochs 10
+
+# Override RV file path
+python pretrain_tcn_rv.py --profile h100 --stream index --rv_file "/path/to/rv.parquet"
+
+
+## Validation & Testing
+
+### Validate Configuration (No training)
+python scripts/validate_stream_config.py
+
+### Check PyTorch CUDA
+python -c "import torch; print('PyTorch:', torch.__version__); print('CUDA:', torch.cuda.is_available()); print('Device:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU')"
+
+
+## Output Checkpoints
+
+Training saves to: checkpoints/
+
+Per-stream checkpoints:
+- tcn_stocks_best.pt          # Full model (stocks)
+- tcn_stocks_encoder.pt       # Encoder only for transfer (stocks)
+- tcn_stocks_latest.pt        # Latest checkpoint (stocks)
+- tcn_options_best.pt         # Full model (options)
+- tcn_options_encoder.pt      # Encoder only for transfer (options)
+- tcn_index_best.pt           # Full model (index)
+- tcn_index_encoder.pt        # Encoder only for transfer (index)
+
+
+## GPU Profiles
+
+rtx5080:  16GB VRAM, stocks filtered to top 100
+h100:     80GB VRAM, full universe
+a100:     80GB VRAM, full universe
+
+
+## Stream-Specific Batch Sizes
+
+Stream    | 16GB (RTX 5080) | 80GB (H100/A100) | Prefetch
+----------|-----------------|------------------|----------
+stocks    | 2,000 chunks    | 11,600 chunks    | 8 files
+options   | 2,800 chunks    | 16,000 chunks    | 12 files
+index     | 4,000 chunks    | 24,000 chunks    | 16 files
+
+
+## Notes
+
+- RTX 5080 (sm_120) requires PyTorch nightly with CUDA 12.8 (cu128)
+- Use: pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/cu128
+- All streams predict SPY 30-day forward RV as auxiliary task
+- Encoder weights transfer to Mamba architecture (e_stk, e_opt, e_idx)
