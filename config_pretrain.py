@@ -142,7 +142,7 @@ class PretrainTCNConfig:
     num_layers: int = 12
     kernel_size: int = 3
     dropout: float = 0.1
-    checkpoint_every: int = 0  # 0 = no checkpointing
+    checkpoint_every: int = 3  # Checkpoint every 3 layers to save memory
     
     # Ticker embedding (disabled for SPY-only pretraining)
     num_tickers: int = 0
