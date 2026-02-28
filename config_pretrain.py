@@ -71,9 +71,9 @@ class StreamConfig:
 STREAM_CONFIGS = {
     'stocks': StreamConfig(
         name='stocks',
-        data_path='D:/Mamba v2/datasets/2022-2023/polygon_stock_trades',
+        data_path=str(PROJECT_ROOT / 'datasets' / '2022-2023' / 'polygon_stock_trades'),
         filter_tickers=True,  # Filter to top 100 on 16GB
-        allowed_tickers_file='D:/Mamba v2/datasets/2022-2023/top_100_stocks.txt',
+        allowed_tickers_file=str(PROJECT_ROOT / 'datasets' / '2022-2023' / 'top_100_stocks.txt'),
         num_tickers=100,
         max_chunks_16gb=2000,   # ~8M ticks/day filtered → baseline
         max_chunks_80gb=11600,
@@ -81,7 +81,7 @@ STREAM_CONFIGS = {
     ),
     'options': StreamConfig(
         name='options',
-        data_path='D:/Mamba v2/datasets/2022-2023/options_trades',
+        data_path=str(PROJECT_ROOT / 'datasets' / '2022-2023' / 'options_trades'),
         filter_tickers=False,
         allowed_tickers_file=None,
         num_tickers=0,
@@ -91,7 +91,7 @@ STREAM_CONFIGS = {
     ),
     'index': StreamConfig(
         name='index',
-        data_path='D:/Mamba v2/datasets/2022-2023/index_data',
+        data_path=str(PROJECT_ROOT / 'datasets' / '2022-2023' / 'index_data'),
         filter_tickers=False,
         allowed_tickers_file=None,
         num_tickers=0,
@@ -105,12 +105,12 @@ STREAM_CONFIGS = {
 @dataclass
 class PretrainDataConfig:
     """Dataset configuration for pretraining."""
-    # Data paths (multi-stream)
-    stocks_path: str = 'D:/Mamba v2/datasets/2022-2023/polygon_stock_trades'
-    options_path: str = 'D:/Mamba v2/datasets/2022-2023/options_trades'
-    index_path: str = 'D:/Mamba v2/datasets/2022-2023/index_data'
-    rv_file: str = 'D:/Mamba v2/datasets/2022-2023/spy_daily_rv.parquet'
-    top_stocks_file: str = 'D:/Mamba v2/datasets/2022-2023/top_100_stocks.txt'
+    # Data paths (multi-stream) - relative to PROJECT_ROOT
+    stocks_path: str = str(PROJECT_ROOT / 'datasets' / '2022-2023' / 'polygon_stock_trades')
+    options_path: str = str(PROJECT_ROOT / 'datasets' / '2022-2023' / 'options_trades')
+    index_path: str = str(PROJECT_ROOT / 'datasets' / '2022-2023' / 'index_data')
+    rv_file: str = str(PROJECT_ROOT / 'datasets' / '2022-2023' / 'spy_daily_rv.parquet')
+    top_stocks_file: str = str(PROJECT_ROOT / 'datasets' / '2022-2023' / 'top_100_stocks.txt')
     
     # Frame settings
     frame_interval: str = '10s'
