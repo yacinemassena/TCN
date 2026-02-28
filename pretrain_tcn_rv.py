@@ -122,7 +122,7 @@ def build_model(config: PretrainConfig, stream: str) -> TCNPretrainModel:
         d_model=config.tcn.hidden_dim,
         num_scalars=3,
         stream_chunks=True,        # Process chunks in batches to reduce memory
-        stream_chunk_size=128,     # Smaller batches for A100 memory efficiency
+        stream_chunk_size=512,     # Process 512 chunks at a time
     )
     
     rv_head = RVPredictionHead(

@@ -104,8 +104,8 @@ STREAM_CONFIGS = {
         filter_tickers=False,
         allowed_tickers_file=None,
         num_tickers=0,
-        max_chunks_16gb=1500,   # Reduced from 4000 - RTX 5080 OOM with TCN-12
-        max_chunks_80gb=8000,   # With stream_chunks=True and PyTorch 2.5+streaming, A100 has issues
+        max_chunks_16gb=200,    # Conservative for RTX 5080
+        max_chunks_80gb=1500,   # Conservative for A100 with checkpointing
         prefetch_files=16,
     ),
 }
