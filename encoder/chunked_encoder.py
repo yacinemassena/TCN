@@ -146,6 +146,11 @@ class ChunkedFrameEncoder(nn.Module):
                 weighted_slice = emb_slice * w_slice
                 sum_emb.index_add_(0, fid, weighted_slice)
                 sum_w.index_add_(0, fid, w_slice)
+                
+                # Free intermediate tensors
+                del chunk_slice, emb_slice, weighted_slice, w_slice, fid
+                if s % (self.stream_chunk_size * 4) == 0:
+                    torch.cuda.empty_cache()
         
         # Normalize by sum of weights (avoid div by zero)
         pooled_emb = sum_emb / (sum_w + 1e-8)  # [TotalFrames, D]
