@@ -41,7 +41,7 @@ s3 = boto3.client('s3',
 )
 
 Path('/TCN/datasets/2022-2023').mkdir(parents=True, exist_ok=True)
-s3.download_file('europe', 'datasets/spy_daily_rv.parquet', '/TCN/datasets/2022-2023/spy_daily_rv.parquet')
+s3.download_file('europe', 'datasets/spy_daily_rv_30d.parquet', '/TCN/datasets/2022-2023/spy_daily_rv.parquet')
 print('Downloaded spy_daily_rv.parquet')
 EOF
 
