@@ -40,7 +40,8 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
-from torch.cuda.amp import GradScaler, autocast
+from torch.cuda.amp import GradScaler
+from torch.amp import autocast
 import numpy as np
 from tqdm import tqdm
 
@@ -272,7 +273,7 @@ def train_epoch(
             continue
         
         amp_dtype = torch.bfloat16 if config.train.amp_dtype == 'bfloat16' else torch.float16
-        with autocast(enabled=config.train.amp, dtype=amp_dtype):
+        with autocast('cuda', enabled=config.train.amp, dtype=amp_dtype):
             rv_preds = model(batch, use_checkpoint=use_checkpoint)
             loss = criterion(rv_preds, rv_targets)
             loss = loss / grad_accum_steps
@@ -367,7 +368,7 @@ def validate(
             continue
         
         amp_dtype = torch.bfloat16 if config.train.amp_dtype == 'bfloat16' else torch.float16
-        with autocast(enabled=config.train.amp, dtype=amp_dtype):
+        with autocast('cuda', enabled=config.train.amp, dtype=amp_dtype):
             rv_preds = model(batch)
             loss = criterion(rv_preds, rv_targets)
         
