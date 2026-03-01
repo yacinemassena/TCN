@@ -3,7 +3,8 @@ TCN Pretraining Script - Per-Stream with GPU Profile Selection.
 
 Features:
 - Single-stream training (stocks, options, or index separately)
-- GPU profile selection (rtx5080/h100/a100)
+- GPU profile selection (rtx5080/rtx5090/h100/a100/amd)
+- Multi-GPU training with DistributedDataParallel (DDP)
 - Background prefetching with on-the-fly filtering
 - Chunk-level batching for strict VRAM control
 - Separate TCN checkpoint per stream for transfer to Mamba architecture
@@ -17,6 +18,12 @@ Usage:
     
     # Train index TCN
     python pretrain_tcn_rv.py --profile h100 --stream index
+    
+    # Multi-GPU training (4 GPUs)
+    python pretrain_tcn_rv.py --profile rtx5080 --stream index --gpus 4
+    
+    # 8 GPU training on large cluster
+    python pretrain_tcn_rv.py --profile h100 --stream stocks --gpus 8
 """
 
 import os
@@ -29,6 +36,9 @@ from typing import Optional
 
 import torch
 import torch.nn as nn
+import torch.distributed as dist
+import torch.multiprocessing as mp
+from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
 from torch.cuda.amp import GradScaler, autocast
 import numpy as np
@@ -49,14 +59,37 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def set_seed(seed: int):
+def set_seed(seed: int, rank: int = 0):
     """Set random seeds for reproducibility."""
     import random
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
+    random.seed(seed + rank)
+    np.random.seed(seed + rank)
+    torch.manual_seed(seed + rank)
     if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
+        torch.cuda.manual_seed_all(seed + rank)
+
+
+def setup_ddp(rank: int, world_size: int):
+    """Initialize DDP process group."""
+    os.environ['MASTER_ADDR'] = 'localhost'
+    os.environ['MASTER_PORT'] = '12355'
+    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    torch.cuda.set_device(rank)
+
+
+def cleanup_ddp():
+    """Cleanup DDP process group."""
+    if dist.is_initialized():
+        dist.destroy_process_group()
+
+
+def is_main_process(rank: int = None) -> bool:
+    """Check if this is the main process (rank 0)."""
+    if rank is not None:
+        return rank == 0
+    if dist.is_initialized():
+        return dist.get_rank() == 0
+    return True
 
 
 class TCNPretrainModel(nn.Module):
@@ -423,8 +456,22 @@ def save_checkpoint(
         torch.save(checkpoint, ckpt_dir / f'tcn_{stream}_epoch_{epoch}.pt')
 
 
-def main(args):
-    """Main training function."""
+def main(rank: int, world_size: int, args):
+    """Main training function with DDP support.
+    
+    Args:
+        rank: GPU rank (0 to world_size-1). For single GPU, rank=0.
+        world_size: Total number of GPUs. For single GPU, world_size=1.
+        args: CLI arguments.
+    """
+    # Setup DDP if using multiple GPUs
+    use_ddp = world_size > 1
+    if use_ddp:
+        setup_ddp(rank, world_size)
+        device = torch.device(f'cuda:{rank}')
+    else:
+        device = torch.device(args.device if args.device else 'cuda')
+    
     config = get_pretrain_config()
     
     # Get GPU profile
@@ -444,12 +491,10 @@ def main(args):
         config.data.rv_file = args.rv_file
     if args.epochs:
         config.train.epochs = args.epochs
-    if args.device:
-        config.train.device = args.device
+    config.train.device = str(device)
     
     # Setup
-    set_seed(config.train.seed)
-    device = torch.device(config.train.device)
+    set_seed(config.train.seed, rank)
     
     # Compute stream-specific batch size
     if gpu_profile.vram_gb <= 16:
@@ -458,30 +503,40 @@ def main(args):
         max_chunks = stream_config.max_chunks_80gb
     filter_enabled = (stream == 'stocks' and gpu_profile.filter_stocks)
     
-    logger.info("=" * 60)
-    logger.info(f"TCN Pretraining - {stream.upper()} Stream")
-    logger.info("=" * 60)
-    logger.info(f"GPU Profile: {gpu_profile.name} ({gpu_profile.vram_gb}GB VRAM)")
-    logger.info(f"Stream: {stream}")
-    logger.info(f"Data path: {stream_config.data_path}")
-    logger.info(f"Filter tickers: {filter_enabled}")
-    logger.info(f"Max chunks/batch: {max_chunks} (stream-tuned)")
-    logger.info(f"Prefetch files: {stream_config.prefetch_files}")
-    logger.info(f"TCN: {config.tcn.num_layers} layers, {config.tcn.hidden_dim} hidden")
-    logger.info(f"Device: {device}")
-    logger.info("=" * 60)
+    if is_main_process(rank):
+        logger.info("=" * 60)
+        logger.info(f"TCN Pretraining - {stream.upper()} Stream")
+        logger.info("=" * 60)
+        logger.info(f"GPU Profile: {gpu_profile.name} ({gpu_profile.vram_gb}GB VRAM)")
+        logger.info(f"Stream: {stream}")
+        logger.info(f"Data path: {stream_config.data_path}")
+        logger.info(f"Filter tickers: {filter_enabled}")
+        logger.info(f"Max chunks/batch: {max_chunks} (stream-tuned)")
+        logger.info(f"Prefetch files: {stream_config.prefetch_files}")
+        logger.info(f"TCN: {config.tcn.num_layers} layers, {config.tcn.hidden_dim} hidden")
+        logger.info(f"Device: {device}")
+        if use_ddp:
+            logger.info(f"DDP: {world_size} GPUs (rank {rank})")
+        logger.info("=" * 60)
     
     # Build model
     model = build_model(config, stream)
     model = model.to(device)
     
+    # Wrap model with DDP if using multiple GPUs
+    if use_ddp:
+        model = DDP(model, device_ids=[rank], output_device=rank)
+    
     num_params = sum(p.numel() for p in model.parameters())
-    logger.info(f"Model parameters: {num_params:,}")
+    if is_main_process(rank):
+        logger.info(f"Model parameters: {num_params:,}")
     
     # Build dataloaders
-    logger.info("Building dataloaders - this may take a moment...")
+    if is_main_process(rank):
+        logger.info("Building dataloaders - this may take a moment...")
     train_loader, val_loader = build_dataloaders(config, gpu_profile, stream)
-    logger.info("Dataloaders ready - starting training loop...")
+    if is_main_process(rank):
+        logger.info("Dataloaders ready - starting training loop...")
     
     # Optimizer
     optimizer = torch.optim.AdamW(
@@ -517,9 +572,10 @@ def main(args):
     epoch_times = []
     
     for epoch in range(1, config.train.epochs + 1):
-        logger.info(f"\n{'='*60}")
-        logger.info(f"Epoch {epoch}/{config.train.epochs}")
-        logger.info("="*60)
+        if is_main_process(rank):
+            logger.info(f"\n{'='*60}")
+            logger.info(f"Epoch {epoch}/{config.train.epochs}")
+            logger.info("="*60)
         
         epoch_start = time.time()
         
@@ -528,6 +584,10 @@ def main(args):
             model, train_loader, optimizer, criterion, scaler, config, epoch,
             use_checkpoint=not args.no_checkpoint
         )
+        
+        # Synchronize across GPUs before validation
+        if use_ddp:
+            dist.barrier()
         
         # Validate
         val_metrics = validate(model, val_loader, criterion, config)
@@ -541,17 +601,18 @@ def main(args):
         eta_seconds = avg_epoch_time * remaining_epochs
         eta_hours = eta_seconds / 3600
         
-        # Log with ETA
-        logger.info(
-            f"Epoch {epoch}/{config.train.epochs} | "
-            f"Train Loss: {train_metrics['loss']:.4f} | "
-            f"Val Loss: {val_metrics['loss']:.4f} | "
-            f"Train Corr: {train_metrics['correlation']:.3f} | "
-            f"Val Corr: {val_metrics['correlation']:.3f} | "
-            f"Time: {epoch_time:.1f}s | "
-            f"Avg: {avg_epoch_time:.1f}s | "
-            f"ETA: {eta_hours:.1f}h ({remaining_epochs} epochs left)"
-        )
+        # Log with ETA (only main process)
+        if is_main_process(rank):
+            logger.info(
+                f"Epoch {epoch}/{config.train.epochs} | "
+                f"Train Loss: {train_metrics['loss']:.4f} | "
+                f"Val Loss: {val_metrics['loss']:.4f} | "
+                f"Train Corr: {train_metrics['correlation']:.3f} | "
+                f"Val Corr: {val_metrics['correlation']:.3f} | "
+                f"Time: {epoch_time:.1f}s | "
+                f"Avg: {avg_epoch_time:.1f}s | "
+                f"ETA: {eta_hours:.1f}h ({remaining_epochs} epochs left)"
+            )
         
         # Checkpointing
         is_best = val_metrics['loss'] < best_val_loss
@@ -561,21 +622,36 @@ def main(args):
         else:
             patience_counter += 1
         
-        save_checkpoint(
-            model, optimizer, scheduler, epoch,
-            {'train_loss': train_metrics['loss'], 'val_loss': val_metrics['loss']},
-            config, is_best
-        )
+        # Only save checkpoints on main process
+        if is_main_process(rank):
+            # Get the underlying model for DDP
+            model_to_save = model.module if use_ddp else model
+            save_checkpoint(
+                model_to_save, optimizer, scheduler, epoch,
+                {'train_loss': train_metrics['loss'], 'val_loss': val_metrics['loss']},
+                config, is_best
+            )
         
         # Early stopping
         if patience_counter >= config.train.early_stopping_patience:
-            logger.info(f"Early stopping at epoch {epoch}")
+            if is_main_process(rank):
+                logger.info(f"Early stopping at epoch {epoch}")
             break
     
-    logger.info("=" * 60)
-    logger.info(f"Training complete. Best val loss: {best_val_loss:.4f}")
-    logger.info(f"Encoder saved to: {config.train.checkpoint_dir}/tcn_{stream}_best.pt")
-    logger.info("=" * 60)
+    if is_main_process(rank):
+        logger.info("=" * 60)
+        logger.info(f"Training complete. Best val loss: {best_val_loss:.4f}")
+        logger.info(f"Encoder saved to: {config.train.checkpoint_dir}/tcn_{stream}_best.pt")
+        logger.info("=" * 60)
+    
+    # Cleanup DDP
+    if use_ddp:
+        cleanup_ddp()
+
+
+def run_ddp(rank: int, world_size: int, args):
+    """Wrapper function for DDP spawning."""
+    main(rank, world_size, args)
 
 
 if __name__ == '__main__':
@@ -591,6 +667,20 @@ if __name__ == '__main__':
     parser.add_argument('--device', type=str, default='cuda', help='Device')
     parser.add_argument('--no-checkpoint', action='store_true', 
                         help='Disable gradient checkpointing (faster but uses more VRAM)')
+    parser.add_argument('--gpus', type=int, default=1,
+                        help='Number of GPUs to use (1-8). Use 1 for single GPU training.')
     
     args = parser.parse_args()
-    main(args)
+    
+    # Validate GPU count
+    num_gpus = min(args.gpus, torch.cuda.device_count())
+    if num_gpus < 1:
+        raise ValueError("No GPUs available")
+    
+    if num_gpus > 1:
+        # Multi-GPU training with DDP
+        print(f"Starting DDP training on {num_gpus} GPUs...")
+        mp.spawn(run_ddp, args=(num_gpus, args), nprocs=num_gpus, join=True)
+    else:
+        # Single GPU training
+        main(rank=0, world_size=1, args=args)
